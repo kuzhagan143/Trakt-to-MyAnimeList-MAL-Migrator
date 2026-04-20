@@ -96,5 +96,3 @@ The `output/` folder contains extensive logs verifying what the algorithm did:
 - `detection_report.json`: Line-by-line justification validating exactly why a specific ID map was accepted, and which tier of the resolver finalized it.
 - `skip_log.json`: A log of every show appropriately bypassed (e.g. Western animation, ongoing uncompleted shows, absent metadata).
 
-## 📝 License
-Distributed under the MIT License. See `LICENSE` for more information.
