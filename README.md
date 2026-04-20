@@ -35,8 +35,8 @@ Finally, it generates an exact `mal_import.xml` duplicate of MAL's official impo
 ### 1. Installation
 Clone the repository and install the required dependencies:
 ```bash
-git clone https://github.com/yourusername/trakt-to-mal.git
-cd trakt-to-mal
+git clone https://github.com/kuzhagan143/Trakt-to-MyAnimeList-MAL-Migrator.git
+cd Trakt-to-MyAnimeList-MAL-Migrator
 
 # Install dependencies needed for logic and UI
 pip install httpx python-dotenv tenacity customtkinter
