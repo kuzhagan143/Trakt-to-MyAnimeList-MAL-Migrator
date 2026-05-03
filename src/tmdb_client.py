@@ -89,11 +89,74 @@ class TMDBClient:
 
         return results
 
+    def is_anime_movie(self, tmdb_id: int) -> bool:
+        """
+        Check if a movie is anime via TMDB API.
+        Returns True if the movie has Animation genre + Japanese language.
+        Uses cache to avoid redundant API calls.
+        """
+        cache_key = f"movie_{tmdb_id}"
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            genres = [g.get("name", "") for g in cached.get("genres", [])]
+            orig_lang = cached.get("original_language", "")
+            return "Animation" in genres and orig_lang == "ja"
+
+        data = self._fetch_endpoint(f"/movie/{tmdb_id}")
+        if data is None:
+            return False
+
+        self._cache[cache_key] = data
+        # Don't save cache here -- batch save at end of classify_movies_batch
+
+        genres = [g.get("name", "") for g in data.get("genres", [])]
+        orig_lang = data.get("original_language", "")
+        return "Animation" in genres and orig_lang == "ja"
+
+    def classify_movies_batch(self, tmdb_ids: list[int]) -> dict[int, bool]:
+        """
+        Check if multiple movies are anime. Returns {tmdb_id: is_anime}.
+        Skips movies already in cache (no API call needed).
+        """
+        results: dict[int, bool] = {}
+
+        # Split into cached vs uncached
+        cached_ids = []
+        uncached_ids = []
+        for tmdb_id in tmdb_ids:
+            cache_key = f"movie_{tmdb_id}"
+            if cache_key in self._cache:
+                cached_ids.append(tmdb_id)
+            else:
+                uncached_ids.append(tmdb_id)
+
+        logger.info(
+            "[TMDB] Movies: %d cached (instant), %d need API calls",
+            len(cached_ids), len(uncached_ids),
+        )
+
+        # Process cached movies instantly (no API calls)
+        for tmdb_id in cached_ids:
+            results[tmdb_id] = self.is_anime_movie(tmdb_id)
+
+        # Process uncached movies (API calls with progress)
+        total_api = len(uncached_ids)
+        for i, tmdb_id in enumerate(uncached_ids, 1):
+            if i % 25 == 0 or i == total_api:
+                logger.info("[TMDB] Movie API progress: %d/%d fetched", i, total_api)
+            results[tmdb_id] = self.is_anime_movie(tmdb_id)
+
+        # Batch save cache after all fetches
+        if uncached_ids:
+            self._save_cache()
+
+        return results
+
     # ── Private Helpers ───────────────────────────────────────────────────
 
-    def _fetch_show(self, tmdb_id: int) -> Optional[dict]:
-        """Make a rate-limited API call to TMDB."""
-        url = f"{TMDB_BASE_URL}/tv/{tmdb_id}"
+    def _fetch_endpoint(self, path: str) -> Optional[dict]:
+        """Make a rate-limited API call to any TMDB endpoint."""
+        url = f"{TMDB_BASE_URL}{path}"
         params = {"api_key": self.api_key, "language": "en-US"}
 
         for attempt in range(1, self.max_retries + 1):
@@ -105,34 +168,37 @@ class TMDBClient:
                 if response.status_code == 200:
                     return response.json()
                 elif response.status_code == 429:
-                    # Rate limited — back off
                     retry_after = int(response.headers.get("Retry-After", 2))
                     wait_time = retry_after * attempt
                     logger.warning(
-                        "[TMDB] Rate limited on ID %d, waiting %ds (attempt %d/%d)",
-                        tmdb_id, wait_time, attempt, self.max_retries,
+                        "[TMDB] Rate limited on %s, waiting %ds (attempt %d/%d)",
+                        path, wait_time, attempt, self.max_retries,
                     )
                     time.sleep(wait_time)
                     continue
                 elif response.status_code == 404:
-                    logger.warning("[TMDB] Show not found: ID %d", tmdb_id)
+                    logger.warning("[TMDB] Not found: %s", path)
                     return None
                 else:
                     logger.warning(
-                        "[TMDB] HTTP %d for ID %d (attempt %d/%d)",
-                        response.status_code, tmdb_id, attempt, self.max_retries,
+                        "[TMDB] HTTP %d for %s (attempt %d/%d)",
+                        response.status_code, path, attempt, self.max_retries,
                     )
 
             except (httpx.TimeoutException, httpx.ConnectError) as exc:
                 wait_time = 2 ** attempt
                 logger.warning(
-                    "[TMDB] %s for ID %d, retrying in %ds (attempt %d/%d)",
-                    type(exc).__name__, tmdb_id, wait_time, attempt, self.max_retries,
+                    "[TMDB] %s for %s, retrying in %ds (attempt %d/%d)",
+                    type(exc).__name__, path, wait_time, attempt, self.max_retries,
                 )
                 time.sleep(wait_time)
 
-        logger.error("[TMDB] Failed to fetch ID %d after %d attempts", tmdb_id, self.max_retries)
+        logger.error("[TMDB] Failed to fetch %s after %d attempts", path, self.max_retries)
         return None
+
+    def _fetch_show(self, tmdb_id: int) -> Optional[dict]:
+        """Fetch TV show data from TMDB."""
+        return self._fetch_endpoint(f"/tv/{tmdb_id}")
 
     @staticmethod
     def _parse_show_data(tmdb_id: int, data: dict) -> ShowMetadata:

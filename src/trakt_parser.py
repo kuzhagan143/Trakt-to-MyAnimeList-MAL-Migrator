@@ -1,9 +1,12 @@
 """
 TraktParser — reads Trakt JSON exports and extracts anime entries.
 
-Movie detection is fully local (genre + language check).
-Show detection requires external TMDB calls, so this class yields
-show candidates for the TMDBClient to classify.
+Handles 5 data sources from the Trakt data folder:
+  - watched-movies.json   -> Anime movie detection (local, genre-based)
+  - watched-shows.json    -> Show season extraction (for TMDB classification)
+  - lists-watchlist.json  -> Plan to Watch entries
+  - ratings-movies.json   -> Movie scores (1-10)
+  - ratings-shows.json    -> Show scores (1-10, applied to all seasons)
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class TraktParser:
-    """Parses Trakt watched-movies.json and watched-shows.json files."""
+    """Parses all Trakt export JSON files from a data folder."""
 
     # Trakt uses "anime" as a genre for Japanese anime movies.
     # Western animated films use "animation" — they are mutually exclusive.
@@ -27,33 +30,89 @@ class TraktParser:
     ANIMATION_GENRE = "animation"
     JAPANESE_LANG = "ja"
 
-    def __init__(self, movies_path: Path, shows_path: Path):
+    def __init__(
+        self,
+        movies_path: Path,
+        shows_path: Path,
+        watchlist_path: Optional[Path] = None,
+        ratings_movies_path: Optional[Path] = None,
+        ratings_shows_path: Optional[Path] = None,
+    ):
         self.movies_path = movies_path
         self.shows_path = shows_path
+        self.watchlist_path = watchlist_path
+        self.ratings_movies_path = ratings_movies_path
+        self.ratings_shows_path = ratings_shows_path
+
+        # Rating lookup tables: trakt_id -> rating (1-10)
+        self._movie_ratings: dict[int, int] = {}
+        self._show_ratings: dict[int, int] = {}
 
     # ── Public API ────────────────────────────────────────────────────────
 
-    def extract_anime_movies(self) -> tuple[list[AnimeEntry], list[SkipRecord]]:
+    def load_ratings(self) -> None:
         """
-        Parse watched-movies.json and return detected anime movies.
-        No API calls needed — detection is purely genre-based.
+        Pre-load all ratings into lookup tables.
+        Call this before extract_anime_movies / extract_show_seasons
+        so that ratings can be injected into entries.
+        """
+        # Movie ratings
+        if self.ratings_movies_path and self.ratings_movies_path.exists():
+            raw = self._load_json(self.ratings_movies_path)
+            if raw:
+                for item in raw:
+                    movie = item.get("movie", {})
+                    trakt_id = movie.get("ids", {}).get("trakt")
+                    rating = item.get("rating")
+                    if trakt_id and rating:
+                        self._movie_ratings[trakt_id] = int(rating)
+                logger.info("Loaded %d movie ratings", len(self._movie_ratings))
+
+        # Show ratings (applied to ALL seasons of that show)
+        if self.ratings_shows_path and self.ratings_shows_path.exists():
+            raw = self._load_json(self.ratings_shows_path)
+            if raw:
+                for item in raw:
+                    show = item.get("show", {})
+                    trakt_id = show.get("ids", {}).get("trakt")
+                    rating = item.get("rating")
+                    if trakt_id and rating:
+                        self._show_ratings[trakt_id] = int(rating)
+                logger.info("Loaded %d show ratings", len(self._show_ratings))
+
+    def extract_anime_movies(self) -> tuple[list[AnimeEntry], list[AnimeEntry], list[SkipRecord]]:
+        """
+        Parse watched-movies.json and return anime movies.
 
         Returns:
-            (anime_entries, skip_records)
+            (anime_entries_detected_locally, unclassified_movie_candidates, skip_records)
+
+        If the Trakt export includes genre data, anime is detected locally.
+        If not (raw API export), all movies are returned as unclassified candidates
+        for TMDB-based classification.
         """
         raw_movies = self._load_json(self.movies_path)
         if raw_movies is None:
-            return [], [SkipRecord(
+            return [], [], [SkipRecord(
                 title="(all movies)",
                 reason=f"Failed to load {self.movies_path}",
                 phase="detection",
             )]
 
         anime_entries: list[AnimeEntry] = []
+        unclassified: list[AnimeEntry] = []
         skip_records: list[SkipRecord] = []
         seen_trakt_ids: set[int] = set()
 
         logger.info("Parsing %d movies from %s", len(raw_movies), self.movies_path.name)
+
+        # Check if first movie has genre data to decide classification mode
+        first_movie = raw_movies[0].get("movie", {}) if raw_movies else {}
+        has_genres = bool(first_movie.get("genres"))
+        if has_genres:
+            logger.info("Genre data found in export -- using local anime detection")
+        else:
+            logger.info("No genre data in export -- all movies will be classified via TMDB")
 
         for raw in raw_movies:
             movie = raw.get("movie")
@@ -74,32 +133,10 @@ class TraktParser:
             if trakt_id:
                 seen_trakt_ids.add(trakt_id)
 
-            # ── Anime detection ───────────────────────────────────────
-            genres = movie.get("genres", [])
-            language = movie.get("language", "")
-
-            is_anime = False
-            reason = ""
-
-            if self.ANIME_GENRE in genres:
-                # Primary rule: Trakt explicitly tags it as "anime"
-                is_anime = True
-                reason = f'Genre "{self.ANIME_GENRE}" found in Trakt genres: {genres}'
-            elif self.ANIMATION_GENRE in genres and language == self.JAPANESE_LANG:
-                # Fallback rule: "animation" + Japanese language
-                is_anime = True
-                reason = (
-                    f'Genre "{self.ANIMATION_GENRE}" + language "{language}" '
-                    f"detected as anime (fallback rule)"
-                )
-
-            if not is_anime:
-                continue  # Not anime — silently skip (don't log non-anime movies)
-
-            # ── Build AnimeEntry ──────────────────────────────────────
             ids = movie.get("ids", {})
             last_watched = raw.get("last_watched_at")
             finish_date = self._extract_date(last_watched)
+            score = self._movie_ratings.get(trakt_id, 0) if trakt_id else 0
 
             entry = AnimeEntry(
                 trakt_id=trakt_id or 0,
@@ -109,21 +146,47 @@ class TraktParser:
                 tmdb_id=ids.get("tmdb"),
                 imdb_id=ids.get("imdb"),
                 tvdb_id=None,
-                episodes_watched=1,        # Movies are always 1 episode
+                episodes_watched=1,
                 total_episodes=1,
                 last_watched_at=last_watched,
                 finish_date=finish_date,
                 status="Completed",
-                score=0,
-                detection_reason=reason,
+                score=score,
+                detection_reason="",
             )
-            anime_entries.append(entry)
 
-        logger.info(
-            "Found %d anime movies out of %d total movies",
-            len(anime_entries), len(raw_movies),
-        )
-        return anime_entries, skip_records
+            if has_genres:
+                # Local classification path
+                genres = movie.get("genres", [])
+                language = movie.get("language", "")
+
+                if self.ANIME_GENRE in genres:
+                    entry.detection_reason = f'Genre "{self.ANIME_GENRE}" found in Trakt genres: {genres}'
+                    anime_entries.append(entry)
+                elif self.ANIMATION_GENRE in genres and language == self.JAPANESE_LANG:
+                    entry.detection_reason = (
+                        f'Genre "{self.ANIMATION_GENRE}" + language "{language}" '
+                        f"detected as anime (fallback rule)"
+                    )
+                    anime_entries.append(entry)
+                # else: not anime, silently skip
+            else:
+                # No genre data -- send to TMDB for classification
+                if ids.get("tmdb"):
+                    unclassified.append(entry)
+
+        if has_genres:
+            logger.info(
+                "Found %d anime movies out of %d total movies (local detection)",
+                len(anime_entries), len(raw_movies),
+            )
+        else:
+            logger.info(
+                "Extracted %d movie candidates for TMDB classification",
+                len(unclassified),
+            )
+
+        return anime_entries, unclassified, skip_records
 
     def extract_show_seasons(self) -> tuple[list[SeasonWatchData], list[SkipRecord]]:
         """
@@ -171,7 +234,7 @@ class TraktParser:
                     title=title,
                     trakt_id=trakt_id,
                     trakt_type="show",
-                    reason="No TMDB ID available — cannot classify via TMDB API",
+                    reason="No TMDB ID available -- cannot classify via TMDB API",
                     phase="detection",
                 ))
                 continue
@@ -217,6 +280,37 @@ class TraktParser:
         )
         return seasons, skip_records
 
+    def extract_watchlist(self) -> tuple[list[dict], list[SkipRecord]]:
+        """
+        Parse lists-watchlist.json and return raw watchlist items.
+        Each item has 'type' ('show' or 'movie') and the corresponding data.
+
+        Returns:
+            (watchlist_items, skip_records)
+        """
+        if not self.watchlist_path or not self.watchlist_path.exists():
+            logger.info("No watchlist file found, skipping")
+            return [], []
+
+        raw = self._load_json(self.watchlist_path)
+        if raw is None:
+            return [], [SkipRecord(
+                title="(watchlist)",
+                reason=f"Failed to load {self.watchlist_path}",
+                phase="detection",
+            )]
+
+        logger.info("Loaded %d watchlist items from %s", len(raw), self.watchlist_path.name)
+        return raw, []
+
+    def get_show_rating(self, trakt_id: int) -> int:
+        """Get the Trakt rating (1-10) for a show. Returns 0 if unrated."""
+        return self._show_ratings.get(trakt_id, 0)
+
+    def get_movie_rating(self, trakt_id: int) -> int:
+        """Get the Trakt rating (1-10) for a movie. Returns 0 if unrated."""
+        return self._movie_ratings.get(trakt_id, 0)
+
     # ── Private Helpers ───────────────────────────────────────────────────
 
     def _load_json(self, path: Path) -> Optional[list]:
@@ -240,5 +334,5 @@ class TraktParser:
         """Extract YYYY-MM-DD from an ISO 8601 timestamp string."""
         if not iso_timestamp:
             return None
-        # "2026-04-17T14:44:00.000Z" → "2026-04-17"
+        # "2026-04-17T14:44:00.000Z" -> "2026-04-17"
         return iso_timestamp[:10] if len(iso_timestamp) >= 10 else None

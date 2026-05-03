@@ -49,6 +49,7 @@ class ReportGenerator:
                 "episodes_watched": entry.episodes_watched,
                 "total_episodes": entry.total_episodes,
                 "status": entry.status,
+                "score": entry.score,
                 "detection_reason": entry.detection_reason,
                 "resolution_tier": entry.resolution_tier,
                 "finish_date": entry.finish_date,
@@ -95,19 +96,28 @@ class ReportGenerator:
         anime_movies: list[AnimeEntry],
         anime_shows: list[AnimeEntry],
         skips: list[SkipRecord],
+        anime_watchlist: list[AnimeEntry] | None = None,
         resolved_count: int = 0,
         unresolved_count: int = 0,
     ) -> None:
         """Print a formatted summary to the console."""
-        total = len(anime_movies) + len(anime_shows)
+        anime_watchlist = anime_watchlist or []
+        total = len(anime_movies) + len(anime_shows) + len(anime_watchlist)
+
+        completed_shows = [s for s in anime_shows if s.status == "Completed"]
+        watching_shows = [s for s in anime_shows if s.status == "Watching"]
+        scored_count = sum(1 for e in (anime_movies + anime_shows) if e.score > 0)
 
         print("\n" + "=" * 60)
         print("  TRAKT -> MAL  |  Processing Summary")
         print("=" * 60)
-        print(f"  Anime Movies Detected   : {len(anime_movies)}")
-        print(f"  Anime Shows  Detected   : {len(anime_shows)}")
+        print(f"  Anime Movies (Completed) : {len(anime_movies)}")
+        print(f"  Anime Shows  (Completed) : {len(completed_shows)}")
+        print(f"  Anime Shows  (Watching)  : {len(watching_shows)}")
+        print(f"  Watchlist (Plan to Watch) : {len(anime_watchlist)}")
         print(f"  ---------------------------------")
         print(f"  Total Anime Entries      : {total}")
+        print(f"  Entries with Scores      : {scored_count}")
 
         if resolved_count or unresolved_count:
             print(f"  MAL IDs Resolved         : {resolved_count}")
@@ -117,18 +127,36 @@ class ReportGenerator:
         print("=" * 60)
 
         if anime_movies:
-            print("\n  [MOVIE]  Anime Movies:")
+            print("\n  [MOVIE]  Anime Movies (Completed):")
             for m in anime_movies:
                 mal_str = f"  [MAL:{m.mal_id}]" if m.mal_id else ""
-                print(f"    - {m.title} ({m.year}){mal_str}")
+                score_str = f"  Score:{m.score}" if m.score > 0 else ""
+                print(f"    - {m.title} ({m.year}){score_str}{mal_str}")
 
-        if anime_shows:
-            print(f"\n  [TV]  Anime Shows ({len(anime_shows)} season entries):")
-            for s in anime_shows:
+        if completed_shows:
+            print(f"\n  [TV]  Anime Shows - Completed ({len(completed_shows)}):")
+            for s in completed_shows:
                 season_str = f" S{s.season_number}" if s.season_number is not None else ""
                 ep_str = f" [{s.episodes_watched}ep]"
                 mal_str = f"  [MAL:{s.mal_id}]" if s.mal_id else ""
-                print(f"    - {s.title}{season_str}{ep_str} -- {s.status}{mal_str}")
+                score_str = f"  Score:{s.score}" if s.score > 0 else ""
+                print(f"    - {s.title}{season_str}{ep_str}{score_str}{mal_str}")
+
+        if watching_shows:
+            print(f"\n  [TV]  Anime Shows - Watching ({len(watching_shows)}):")
+            for s in watching_shows:
+                season_str = f" S{s.season_number}" if s.season_number is not None else ""
+                total_str = f"/{s.total_episodes}" if s.total_episodes else ""
+                ep_str = f" [{s.episodes_watched}{total_str}ep]"
+                mal_str = f"  [MAL:{s.mal_id}]" if s.mal_id else ""
+                score_str = f"  Score:{s.score}" if s.score > 0 else ""
+                print(f"    - {s.title}{season_str}{ep_str}{score_str}{mal_str}")
+
+        if anime_watchlist:
+            print(f"\n  [PTW]  Plan to Watch ({len(anime_watchlist)}):")
+            for w in anime_watchlist:
+                mal_str = f"  [MAL:{w.mal_id}]" if w.mal_id else ""
+                print(f"    - {w.title} ({w.year}){mal_str}")
 
         if skips:
             print(f"\n  [WARN]  Skipped ({len(skips)}):")

@@ -37,19 +37,40 @@ class Config:
             )
         return key
 
-    # ── Input Files ───────────────────────────────────────────────────────
+    # ── Trakt Data Directory ─────────────────────────────────────────────
+
+    @property
+    def trakt_data_dir(self) -> Path:
+        """Root folder containing all Trakt export JSON files."""
+        if hasattr(self, '_data_dir_override') and self._data_dir_override:
+            return self._data_dir_override
+        return self.project_root / os.getenv("TRAKT_DATA_DIR", "Trakt data")
+
+    # ── Input Files (auto-discovered from trakt_data_dir) ────────────────
 
     @property
     def trakt_movies_file(self) -> Path:
         if hasattr(self, '_movies_override') and self._movies_override:
             return self._movies_override
-        return self.project_root / os.getenv("TRAKT_MOVIES_FILE", "watched-movies.json")
+        return self.trakt_data_dir / "watched-movies.json"
 
     @property
     def trakt_shows_file(self) -> Path:
         if hasattr(self, '_shows_override') and self._shows_override:
             return self._shows_override
-        return self.project_root / os.getenv("TRAKT_SHOWS_FILE", "watched-shows.json")
+        return self.trakt_data_dir / "watched-shows.json"
+
+    @property
+    def trakt_watchlist_file(self) -> Path:
+        return self.trakt_data_dir / "lists-watchlist.json"
+
+    @property
+    def trakt_ratings_movies_file(self) -> Path:
+        return self.trakt_data_dir / "ratings-movies.json"
+
+    @property
+    def trakt_ratings_shows_file(self) -> Path:
+        return self.trakt_data_dir / "ratings-shows.json"
 
     # ── Output Directory ──────────────────────────────────────────────────
 
