@@ -15,8 +15,10 @@ Finally, it generates an exact `mal_import.xml` duplicate of MAL's official impo
 
 ## ✨ Features
 
-- **Smart Offline Movie Sorting**: Detects anime movies without using API limits by utilizing Trakt's specific tagging conventions.
-- **TMDB Show Validating**: Programmatically scans Trakt TV show mappings against TMDB metadata specifically matching the `Animation` genre attached to `ja` language strings.
+- **Comprehensive Data Ingestion**: Seamlessly processes your entire `Trakt data` folder, reading watch history, watchlists, and user ratings simultaneously.
+- **Multi-Status Tracking**: Automatically categorizes entries into `Completed`, `Watching` (for partially finished seasons), and `Plan to Watch` (from watchlists).
+- **User Rating Injection**: Intelligently extracts your 1-10 Trakt ratings and applies them across all relevant MAL season entries.
+- **Optimized TMDB Classification**: Features a robust movie classification engine that uses aggressive local caching and offline database pre-filtering to handle raw, genre-less API exports efficiently without burning through rate limits.
 - **Season Disaggregation**: Native mapping logic that splits Trakt's single continuous TV shows into individually recognized MAL entries for every season.
 - **Intelligent API Pipeline**: Includes Rate Limiting and strict Connection Pooling to navigate around blocks:
   1. Offline DB mapping for thousands of titles (`anime_ids.json`).
@@ -38,15 +40,16 @@ Clone the repository and install the required dependencies:
 git clone https://github.com/kuzhagan143/Trakt-to-MyAnimeList-MAL-Migrator.git
 ```
 ```bash
-cd Trakt-to-MyAnimeList-MAL-Migrator
+cd trakt-to-mal
 ```
+
 Install dependencies needed for logic and UI
 ```bash
 pip install httpx python-dotenv tenacity customtkinter
 ```
 
 ### 2. Prepare Data
-Export your data from Trakt and place `watched-movies.json` and `watched-shows.json` inside the project folder.
+Export your data from Trakt and place the entire **`Trakt data`** folder (containing your `watched-movies.json`, `watched-shows.json`, `lists-watchlist.json`, and ratings files) into the project directory.
 
 Next, copy the environment template and insert your API key:
 ```bash
@@ -63,21 +66,21 @@ Launch the tool's visual interface.
 ```bash
 python -m src.main
 ```
-1. Verify the location of your Trakt JSON exports.
+1. Select the location of your `Trakt data` folder using the "Browse" button.
 2. Click **Start Processing** and observe the live log terminal.
 3. Your final export will land in the `/output` folder upon completion.
 
 ### Option B: Command Line Interface (Headless)
 If you prefer running this via a server or purely through bash scripts, the CLI handles all paths smoothly.
 ```bash
-# Basic run based on .env paths
+# Basic run using the default Trakt data folder
 python -m src.main --cli 
 
 # Detailed logging view
 python -m src.main --cli --verbose
 
-# Run with completely customized files
-python -m src.main --cli --movies /path/to/movies.json --shows /path/to/shows.json
+# Run with a custom Trakt data folder path
+python -m src.main --cli --data-dir "/path/to/Trakt data"
 ```
 
 ---
@@ -96,6 +99,6 @@ python -m src.main --cli --movies /path/to/movies.json --shows /path/to/shows.js
 ## 🛠️ Diagnostics and Output Files
 
 The `output/` folder contains extensive logs verifying what the algorithm did:
-- `detection_report.json`: Line-by-line justification validating exactly why a specific ID map was accepted, and which tier of the resolver finalized it.
+- `detection_report.json`: Line-by-line justification validating exactly why a specific ID map was accepted, which tier of the resolver finalized it, and includes the mapped user scores.
 - `skip_log.json`: A log of every show appropriately bypassed (e.g. Western animation, ongoing uncompleted shows, absent metadata).
 
