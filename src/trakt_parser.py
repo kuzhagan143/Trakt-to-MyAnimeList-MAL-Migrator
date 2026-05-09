@@ -149,6 +149,7 @@ class TraktParser:
                 episodes_watched=1,
                 total_episodes=1,
                 last_watched_at=last_watched,
+                start_date=finish_date,
                 finish_date=finish_date,
                 status="Completed",
                 score=score,
@@ -248,12 +249,16 @@ class TraktParser:
                 episodes = season_data.get("episodes", [])
                 ep_count = len(episodes)
 
-                # Find the latest watch timestamp in this season
+                # Find the earliest and latest watch timestamp in this season
+                first_watched = None
                 last_watched = None
                 for ep in episodes:
                     ep_watched = ep.get("last_watched_at")
-                    if ep_watched and (last_watched is None or ep_watched > last_watched):
-                        last_watched = ep_watched
+                    if ep_watched:
+                        if first_watched is None or ep_watched < first_watched:
+                            first_watched = ep_watched
+                        if last_watched is None or ep_watched > last_watched:
+                            last_watched = ep_watched
 
                 # Deduplicate by (trakt_id, season_number)
                 key = f"{trakt_id}:S{season_num}"
@@ -271,6 +276,7 @@ class TraktParser:
                     season_number=season_num,
                     episodes_watched=ep_count,
                     total_aired_episodes=aired_episodes,
+                    first_watched_at=first_watched,
                     last_watched_at=last_watched,
                 ))
 

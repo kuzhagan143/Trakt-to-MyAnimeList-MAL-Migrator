@@ -34,6 +34,7 @@ class AnimeEntry:
     episodes_watched: int = 0
     total_episodes: Optional[int] = None     # Total episodes from Trakt/TMDB
     last_watched_at: Optional[str] = None
+    start_date: Optional[str] = None         # Derived from first_watched_at
     finish_date: Optional[str] = None        # Derived from last_watched_at
 
     # ── MAL fields ────────────────────────────────────────────────────────
@@ -99,5 +100,6 @@ class SeasonWatchData:
     season_number: int
     episodes_watched: int
     total_aired_episodes: int               # From the show-level aired_episodes field
+    first_watched_at: Optional[str] = None
     last_watched_at: Optional[str] = None
     is_complete: bool = False               # All episodes of this season watched?

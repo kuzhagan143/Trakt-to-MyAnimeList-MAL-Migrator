@@ -52,6 +52,7 @@ class ReportGenerator:
                 "score": entry.score,
                 "detection_reason": entry.detection_reason,
                 "resolution_tier": entry.resolution_tier,
+                "start_date": entry.start_date,
                 "finish_date": entry.finish_date,
             })
 

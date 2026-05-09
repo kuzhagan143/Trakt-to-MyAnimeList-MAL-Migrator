@@ -109,7 +109,7 @@ class MALXmlGenerator:
         series_type = self._determine_series_type(entry)
         total_eps = entry.mal_total_episodes or entry.total_episodes or 0
         watched_eps = entry.episodes_watched
-        start_date = "0000-00-00"
+        start_date = entry.start_date or "0000-00-00"
         finish_date = entry.finish_date or "0000-00-00"
 
         # If not completed, don't set finish date

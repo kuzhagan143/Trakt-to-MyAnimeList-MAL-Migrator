@@ -191,6 +191,10 @@ def run_pipeline(config: Config, verbose: bool = False) -> None:
         if is_complete and season_data.last_watched_at and len(season_data.last_watched_at) >= 10:
             finish_date = season_data.last_watched_at[:10]
 
+        start_date = None
+        if season_data.first_watched_at and len(season_data.first_watched_at) >= 10:
+            start_date = season_data.first_watched_at[:10]
+
         # Inject show-level rating from Trakt (applies to all seasons)
         score = parser.get_show_rating(season_data.show_trakt_id)
 
@@ -206,6 +210,7 @@ def run_pipeline(config: Config, verbose: bool = False) -> None:
             episodes_watched=season_data.episodes_watched,
             total_episodes=season_ep_count or None,
             last_watched_at=season_data.last_watched_at,
+            start_date=start_date,
             finish_date=finish_date,
             status=status,
             score=score,
